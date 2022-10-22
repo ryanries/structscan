@@ -1,3 +1,10 @@
+// structscan - a WinDbg extension that scans data structures for which you do not have 
+// private symbols and attempts to find interesting data in them.
+// Joseph Ryan Ries - 2022. Watch the development on this extension on video
+// here: https://www.youtube.com/watch?v=d1uT8tmnhZI
+//
+
+//
 #define INITGUID
 
 #include <DbgEng.h>
