@@ -3,8 +3,14 @@
 // Joseph Ryan Ries - 2022. Watch the development on this extension on video
 // here: https://www.youtube.com/watch?v=d1uT8tmnhZI
 //
+// TODO: Currently the only way I have gotten this to work is if I install my callback to
+// get debugger output, execute the debugger command, then reinstall the original callback
+// to write text to the debugger window. I feel like this constant flipping back and forth
+// between the two callbacks is probably wrong. There must be a better way. I feel like I'm
+// supposed to be supplying an array of callbacks that will be called in series, but I don't know...
 
-//
+// Need to define INITGUID before dbgeng.h because we need to use the GUIDs
+// from C, since we don't have __uuidof
 #define INITGUID
 
 #include <DbgEng.h>
@@ -17,69 +23,11 @@
 
 #define EXTENSION_VERSION_MINOR 0
 
+
 wchar_t gOutputBuffer[4096];
 
 wchar_t gCommandBuffer[128];
 
-ULONG __cdecl CbAddRef(IDebugOutputCallbacks2* This)
-{
-	UNREFERENCED_PARAMETER(This);
-
-	return(1);
-}
-
-ULONG __cdecl CbQueryInterface(IDebugOutputCallbacks2* This, IN REFIID InterfaceId, OUT PVOID* Interface)
-{
-	UNREFERENCED_PARAMETER(InterfaceId);
-
-	*Interface = This;
-
-	CbAddRef(This);
-
-	return(S_OK);
-}
-
-ULONG __cdecl CbRelease(IDebugOutputCallbacks2* This)
-{
-	UNREFERENCED_PARAMETER(This);
-
-	return(0);
-}
-
-HRESULT __cdecl CbGetInterestMask(IDebugOutputCallbacks2* This, OUT PULONG Mask)
-{
-	UNREFERENCED_PARAMETER(This);
-
-	*Mask = DEBUG_OUTCBI_ANY_FORMAT;
-
-	return(S_OK);
-}
-
-HRESULT __stdcall CbOutput(IDebugOutputCallbacks2* This, IN ULONG Mask, IN PCSTR Text)
-{
-	UNREFERENCED_PARAMETER(This);
-
-	UNREFERENCED_PARAMETER(Mask);
-
-	UNREFERENCED_PARAMETER(Text);
-
-	return(S_OK);
-}
-
-HRESULT __stdcall CbOutput2(IDebugOutputCallbacks2* This, IN ULONG Which, IN ULONG Flags, IN ULONG64 Arg, PCWSTR Text)
-{
-	UNREFERENCED_PARAMETER(This);
-
-	UNREFERENCED_PARAMETER(Which);
-
-	UNREFERENCED_PARAMETER(Flags);
-	
-	UNREFERENCED_PARAMETER(Arg);
-
-	wcscpy_s(gOutputBuffer, _countof(gOutputBuffer), Text);
-
-	return(S_OK);
-}
 
 
 IDebugOutputCallbacks2* gPrevOutputCallback;
@@ -94,6 +42,17 @@ IDebugOutputCallbacks2Vtbl gOcbVtbl = {
 	.QueryInterface = &CbQueryInterface,
 	.GetInterestMask = &CbGetInterestMask };
 
+// This is the entry point of our DLL. EngHost calls this as soon as you load the DLL.
+__declspec(dllexport) HRESULT CALLBACK DebugExtensionInitialize(_Out_ PULONG Version, _Out_ PULONG Flags)
+{
+	*Version = DEBUG_EXTENSION_VERSION(EXTENSION_VERSION_MAJOR, EXTENSION_VERSION_MINOR);
+
+	*Flags = 0;
+
+	gOutputCallback.lpVtbl = &gOcbVtbl;
+
+	return(S_OK);
+}
 
 __declspec(dllexport) HRESULT CALLBACK structscan(_In_ IDebugClient4* Client, _In_opt_ PCSTR Args)
 {
@@ -127,7 +86,7 @@ __declspec(dllexport) HRESULT CALLBACK structscan(_In_ IDebugClient4* Client, _I
 
 	mbstowcs_s(&CharsConverted, WideArgs, _countof(WideArgs), Args, _TRUNCATE);
 
-	if ((Hr = Client->lpVtbl->QueryInterface(Client, &IID_IDebugControl4, (void**)&DebugControl) != S_OK))
+	if ((Hr = Client->lpVtbl->QueryInterface(Client, &IID_IDebugControl4, (void**)&DebugControl)) != S_OK)
 	{
 		goto Exit;
 	}
@@ -294,13 +253,68 @@ Exit:
 	return(Hr);
 }
 
-__declspec(dllexport) HRESULT CALLBACK DebugExtensionInitialize(_Out_ PULONG Version, _Out_ PULONG Flags)
+// All of these CbXXX functions are my implementations of the methods that you would
+// find on a IDebugCallbacks2 interface. I will put pointers to all of these functions
+// into a "lpVtbl" and set that onto my callback during the extension initialization routine.
+// All of these functions need to exist even if they don't do anything because the debug engine
+// will try to call them and enghost will crash if any function pointers are null.
+
+ULONG __cdecl CbAddRef(IDebugOutputCallbacks2* This)
 {
-	*Version = DEBUG_EXTENSION_VERSION(EXTENSION_VERSION_MAJOR, EXTENSION_VERSION_MINOR);
+	UNREFERENCED_PARAMETER(This);
 
-	*Flags = 0;
+	return(1);
+}
 
-	gOutputCallback.lpVtbl = &gOcbVtbl;
+ULONG __cdecl CbQueryInterface(IDebugOutputCallbacks2* This, IN REFIID InterfaceId, OUT PVOID* Interface)
+{
+	UNREFERENCED_PARAMETER(InterfaceId);
+
+	*Interface = This;
+
+	CbAddRef(This);
+
+	return(S_OK);
+}
+
+ULONG __cdecl CbRelease(IDebugOutputCallbacks2* This)
+{
+	UNREFERENCED_PARAMETER(This);
+
+	return(0);
+}
+
+HRESULT __cdecl CbGetInterestMask(IDebugOutputCallbacks2* This, OUT PULONG Mask)
+{
+	UNREFERENCED_PARAMETER(This);
+
+	*Mask = DEBUG_OUTCBI_ANY_FORMAT;
+
+	return(S_OK);
+}
+
+HRESULT __stdcall CbOutput(IDebugOutputCallbacks2* This, IN ULONG Mask, IN PCSTR Text)
+{
+	UNREFERENCED_PARAMETER(This);
+
+	UNREFERENCED_PARAMETER(Mask);
+
+	UNREFERENCED_PARAMETER(Text);
+
+	return(S_OK);
+}
+
+HRESULT __stdcall CbOutput2(IDebugOutputCallbacks2* This, IN ULONG Which, IN ULONG Flags, IN ULONG64 Arg, PCWSTR Text)
+{
+	UNREFERENCED_PARAMETER(This);
+
+	UNREFERENCED_PARAMETER(Which);
+
+	UNREFERENCED_PARAMETER(Flags);
+
+	UNREFERENCED_PARAMETER(Arg);
+
+	wcscpy_s(gOutputBuffer, _countof(gOutputBuffer), Text);
 
 	return(S_OK);
 }
